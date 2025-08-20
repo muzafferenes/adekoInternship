@@ -1,0 +1,25 @@
+# Visual Studio dosyaları
+.vs/
+.vscode/
+
+# Bin ve obj klasörleri
+bin/
+obj/
+
+# Paket yöneticisi klasörleri
+packages/
+
+# Diğer geçici dosyalar
+*.log
+*.tmp
+*.bak
+
+# IDE dosyaları
+.idea/
+
+# Sisteme özel dosyalar
+.DS_Store
+Thumbs.db
+
+config.txt
+*.configgit add .
