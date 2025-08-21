@@ -145,9 +145,298 @@ namespace MutfakDizilim
         }
 
         // Her zaman 1,000,000 dizilim oluştur
+        // Yeni kontrol methodu - Kiler buzdolabının yanında mı kontrolü
+        private List<(string, int)> GenerateLDuzeni(int duvar1, int duvar2)
+        {
+            // 1) Pencere yasaklı alanlarını iki duvara ayır
+            List<(int, int, string)> d1Yasak, d2Yasak;
+            GetDuvarYasakliAlanlari(duvar1, duvar2, out d1Yasak, out d2Yasak);
+
+            // 2) Zorunlu modüller (evye‑fırın‑bulaşık‑buzdolabı) - hepsi zorunlu 1 tane
+            List<string> reqTypes = new List<string> { "evye", "firin", "bulasik", "buzdolabi" };
+            List<(string, int)> required = new List<(string, int)>();
+            foreach (string t in reqTypes)
+                required.Add((t, MODULES[t][rnd.Next(MODULES[t].Count)]));
+
+            // 3) Corner modülü seç
+            var corner = CORNER_MODULES[rnd.Next(CORNER_MODULES.Count)];
+            int yatayMax = duvar1 - corner.width1;
+            int dikeyMax = duvar2;
+
+            List<(string, int)> yatay = new List<(string, int)>();
+            List<(string, int)> dikey = new List<(string, int)>();
+            List<(string, int)> tempReq = new List<(string, int)>(required);
+
+            // 4) Zorunlu modülleri basit şekilde yerleştir (sona ekleme)
+            while (tempReq.Count > 0)
+            {
+                int pick = rnd.Next(tempReq.Count);
+                var m = tempReq[pick];
+                bool yatayda = rnd.Next(2) == 0;
+                bool yerlesti = false;
+
+                if (yatayda)
+                {
+                    // Yatay duvara eklemeyi dene
+                    int s = yatay.Sum(x => x.Item2);
+                    int e = s + m.Item2;
+                    if (e <= yatayMax)
+                    {
+                        yatay.Add(m);
+                        yerlesti = true;
+                    }
+                    else
+                    {
+                        // Yataya sığmıyorsa dikey duvara dene
+                        int ds = corner.width2 + dikey.Sum(x => x.Item2);
+                        int de = ds + m.Item2;
+                        if (de <= dikeyMax)
+                        {
+                            dikey.Add(m);
+                            yerlesti = true;
+                        }
+                    }
+                }
+                else
+                {
+                    // Dikey duvara eklemeyi dene
+                    int ds = corner.width2 + dikey.Sum(x => x.Item2);
+                    int de = ds + m.Item2;
+                    if (de <= dikeyMax)
+                    {
+                        dikey.Add(m);
+                        yerlesti = true;
+                    }
+                    else
+                    {
+                        // Dikeye sığmıyorsa yatay duvara dene
+                        int s = yatay.Sum(x => x.Item2);
+                        int e = s + m.Item2;
+                        if (e <= yatayMax)
+                        {
+                            yatay.Add(m);
+                            yerlesti = true;
+                        }
+                    }
+                }
+
+                if (!yerlesti)
+                {
+                    // Zorunlu modül yerleştirilemedi, başarısız
+                    return null;
+                }
+
+                tempReq.RemoveAt(pick);
+            }
+
+            // 5) Kiler ekleme - sadece buzdolabının yanına eklenebilir (shuffle öncesi)
+            bool kilerEklenecekMi = rnd.NextDouble() < 0.7; // %70 şans ile kiler ekle
+            if (kilerEklenecekMi)
+            {
+                int kilerWidth = MODULES["kiler"][rnd.Next(MODULES["kiler"].Count)];
+                TryEkleKilerBuzdolabiYanina(yatay, dikey, kilerWidth, yatayMax, dikeyMax, corner.width2);
+            }
+
+            // 6) Kalan boşlukları rastgele modüllerle doldur (dolap, çekmece)
+            List<string> rastgeleModuller = new List<string> { "dolap", "cekmece" };
+            YatayAlaniDoldurRastgele(yatay, rastgeleModuller, yatay.Sum(x => x.Item2), yatayMax);
+            DikeyAlaniDoldurRastgele(dikey, rastgeleModuller, corner.width2 + dikey.Sum(x => x.Item2), dikeyMax, corner.width2);
+
+            // 7) *** ÖNEMLİ: Sıralamaları shuffle et ***
+            ShuffleList(yatay);
+            ShuffleList(dikey);
+
+            // 8) Shuffle sonrası kiler kontrolü
+            List<(string, int)> tempResult = new List<(string, int)>();
+            tempResult.AddRange(yatay);
+            tempResult.Add((corner.type + "_1", corner.width1));
+            tempResult.Add((corner.type + "_2", corner.width2));
+            tempResult.AddRange(dikey);
+
+            // Kiler varsa buzdolabının yanında mı kontrol et
+            if (!KilerBuzdolabiYanindaMi(tempResult))
+            {
+                // Kiler buzdolabının yanında değilse, kileri çıkar
+                yatay.RemoveAll(x => x.Item1 == "kiler");
+                dikey.RemoveAll(x => x.Item1 == "kiler");
+            }
+
+            // 9) Pencere kontrolleri yap
+            if (!PencereKontrolleriniGeciyorMu(yatay, d1Yasak, 1) ||
+                !PencereKontrolleriniGeciyorMu(dikey, d2Yasak, 2, corner.width2))
+            {
+                // Pencere kontrolü başarısızsa, tekrar shuffle dene (maksimum 3 deneme)
+                for (int deneme = 0; deneme < 3; deneme++)
+                {
+                    ShuffleList(yatay);
+                    ShuffleList(dikey);
+
+                    if (PencereKontrolleriniGeciyorMu(yatay, d1Yasak, 1) &&
+                        PencereKontrolleriniGeciyorMu(dikey, d2Yasak, 2, corner.width2))
+                    {
+                        break;
+                    }
+
+                    if (deneme == 2) // Son deneme de başarısızsa
+                        return null;
+                }
+            }
+
+            // 10) Final sonucu oluştur
+            List<(string, int)> result = new List<(string, int)>();
+            result.AddRange(yatay);
+            result.Add((corner.type + "_1", corner.width1));
+            result.Add((corner.type + "_2", corner.width2));
+            result.AddRange(dikey);
+
+            return result;
+        }
+
+        // Liste shuffle metodu
+        private void ShuffleList<T>(List<T> list)
+        {
+            for (int i = list.Count - 1; i > 0; i--)
+            {
+                int j = rnd.Next(i + 1);
+                T temp = list[i];
+                list[i] = list[j];
+                list[j] = temp;
+            }
+        }
+
+        // Pencere kontrollerini toplu şekilde yapar
+        private bool PencereKontrolleriniGeciyorMu(List<(string, int)> modules,
+            List<(int, int, string)> yasakliAlanlar, int duvarNo, int cornerOffset = 0)
+        {
+            int currentPos = 0;
+            foreach (var module in modules)
+            {
+                int startPos = currentPos;
+                int endPos = currentPos + module.Item2;
+
+                // Dikey duvar için corner offset'i çıkar
+                if (duvarNo == 2)
+                {
+                    if (PencereIleCarpisiyorMu(startPos, endPos, yasakliAlanlar, module.Item1, duvarNo))
+                        return false;
+                }
+                else
+                {
+                    if (PencereIleCarpisiyorMu(startPos, endPos, yasakliAlanlar, module.Item1, duvarNo))
+                        return false;
+                }
+
+                currentPos = endPos;
+            }
+            return true;
+        }
+
+        // Kileri buzdolabının yanına eklemeyi deneyen metod (basitleştirilmiş)
+        private void TryEkleKilerBuzdolabiYanina(List<(string, int)> yatay, List<(string, int)> dikey,
+            int kilerWidth, int yatayMax, int dikeyMax, int cornerWidth2)
+        {
+            // Buzdolabının hangi listede olduğunu bul
+            bool buzdolabiYatayda = yatay.Any(x => x.Item1 == "buzdolabi");
+            bool buzdolabiDikeyde = dikey.Any(x => x.Item1 == "buzdolabi");
+
+            // Alan kontrolü yaparak kileri uygun listeye ekle
+            if (buzdolabiYatayda && yatay.Sum(x => x.Item2) + kilerWidth <= yatayMax)
+            {
+                yatay.Add(("kiler", kilerWidth));
+            }
+            else if (buzdolabiDikeyde && cornerWidth2 + dikey.Sum(x => x.Item2) + kilerWidth <= dikeyMax)
+            {
+                dikey.Add(("kiler", kilerWidth));
+            }
+            // Sığmıyorsa kiler eklenmez
+        }
+
+        // Basit rastgele modül doldurma metodu (yatay)
+        private void YatayAlaniDoldurRastgele(List<(string, int)> yatay, List<string> rastgeleModuller,
+            int currentWidth, int maxWidth)
+        {
+            while (currentWidth < maxWidth)
+            {
+                string moduleType = rastgeleModuller[rnd.Next(rastgeleModuller.Count)];
+
+                if (!MODULES.ContainsKey(moduleType) || MODULES[moduleType].Count == 0)
+                    break;
+
+                int moduleWidth = MODULES[moduleType][rnd.Next(MODULES[moduleType].Count)];
+
+                if (currentWidth + moduleWidth <= maxWidth)
+                {
+                    yatay.Add((moduleType, moduleWidth));
+                    currentWidth += moduleWidth;
+                }
+                else
+                {
+                    break;
+                }
+            }
+        }
+
+        // Basit rastgele modül doldurma metodu (dikey)
+        private void DikeyAlaniDoldurRastgele(List<(string, int)> dikey, List<string> rastgeleModuller,
+            int currentWidth, int maxWidth, int cornerWidth2)
+        {
+            while (currentWidth < maxWidth)
+            {
+                string moduleType = rastgeleModuller[rnd.Next(rastgeleModuller.Count)];
+
+                if (!MODULES.ContainsKey(moduleType) || MODULES[moduleType].Count == 0)
+                    break;
+
+                int moduleWidth = MODULES[moduleType][rnd.Next(MODULES[moduleType].Count)];
+
+                if (currentWidth + moduleWidth <= maxWidth)
+                {
+                    dikey.Add((moduleType, moduleWidth));
+                    currentWidth += moduleWidth;
+                }
+                else
+                {
+                    break;
+                }
+            }
+        }
+
+        // Mevcut kontrol metodunuz
+        private bool KilerBuzdolabiYanindaMi(List<(string, int)> layout)
+        {
+            // Önce kiler var mı kontrol et
+            int kilerIndex = -1;
+            for (int i = 0; i < layout.Count; i++)
+            {
+                if (layout[i].Item1 == "kiler")
+                {
+                    kilerIndex = i;
+                    break;
+                }
+            }
+            // Kiler yoksa sorun yok
+            if (kilerIndex == -1) return true;
+            // Kiler varsa, buzdolabının yanında mı kontrol et
+            int buzdolabiIndex = -1;
+            for (int i = 0; i < layout.Count; i++)
+            {
+                if (layout[i].Item1 == "buzdolabi")
+                {
+                    buzdolabiIndex = i;
+                    break;
+                }
+            }
+            // Buzdolabı yoksa (olmaması gereken durum) false döndür
+            if (buzdolabiIndex == -1) return false;
+            // Kiler buzdolabının hemen yanında mı kontrol et (solunda veya sağında)
+            return Math.Abs(kilerIndex - buzdolabiIndex) == 1;
+        }
+
+        // Güncellenmiş Uret methodu
         public List<(int skor, List<(string, int)> dizilim, List<string> log)> Uret(int duvar1, int duvar2)
         {
             var sonuc = new List<(int, List<(string, int)>, List<string>)>();
+
             for (int i = 0; i < 1000000; i++)
             {
                 var layout = (duvar2 == 0)
@@ -156,331 +445,16 @@ namespace MutfakDizilim
 
                 if (layout == null) continue;
 
+                // Yeni kontrol: Kiler buzdolabının yanında mı?
+                if (!KilerBuzdolabiYanindaMi(layout)) continue;
+
                 List<string> log;
                 int skor = Evaluate(layout, duvar1 + duvar2, duvar1, duvar2, out log);
                 sonuc.Add((skor, layout, log));
             }
+
             return sonuc.OrderByDescending(x => x.Item1).ToList();
         }
-
-
-
-
-
-
-
-        private List<(string, int)> GenerateLDuzeni(int duvar1, int duvar2)
-        {
-            // 1) Pencere yasaklı alanlarını iki duvara ayır
-            List<(int, int, string)> d1Yasak, d2Yasak;
-            GetDuvarYasakliAlanlari(duvar1, duvar2, out d1Yasak, out d2Yasak);
-
-            // 2) Zorunlu modüller (evye‑fırın‑bulaşık) rastgele sıralanır
-            List<string> reqTypes = new List<string> { "evye", "firin", "bulasik" };
-            for (int i = reqTypes.Count - 1; i > 0; i--)
-            {
-                int j = rnd.Next(i + 1);
-                string tmp = reqTypes[i]; reqTypes[i] = reqTypes[j]; reqTypes[j] = tmp;
-            }
-            List<(string, int)> required = new List<(string, int)>();
-            foreach (string t in reqTypes)
-                required.Add((t, MODULES[t][rnd.Next(MODULES[t].Count)]));
-
-            // 3) Buzdolabı ve kiler genişlikleri
-            int fridgeWidth = MODULES["buzdolabi"][rnd.Next(MODULES["buzdolabi"].Count)];
-            int cellarWidth = MODULES["kiler"][rnd.Next(MODULES["kiler"].Count)];
-
-            // 4) Senaryolar: 0 → buzdolabı yatay başta, 1 → dikey sonda
-            List<int> scenarios = new List<int>();
-            int ilkSenaryo = rnd.Next(2); // 0 veya 1 rastgele seç
-            scenarios.Add(ilkSenaryo);    // İlk tercih
-            scenarios.Add(1 - ilkSenaryo); // Alternatif
-
-            foreach (int senaryo in scenarios)
-            {
-                List<(string, int)> yatay = new List<(string, int)>();
-                List<(string, int)> dikey = new List<(string, int)>();
-                List<(string, int)> tempReq = new List<(string, int)>(required);
-
-                var corner = CORNER_MODULES[rnd.Next(CORNER_MODULES.Count)];
-                int yatayMax = duvar1 - corner.width1;
-                int dikeyMax = duvar2;
-                bool ok = true;
-
-                // --- buzdolabı başta senaryosu ---
-                if (senaryo == 0)
-                {
-                    if (fridgeWidth > yatayMax ||
-                        PencereIleCarpisiyorMu(0, fridgeWidth, d1Yasak, "buzdolabi", 1))
-                    {
-                        ok = false;
-                    }
-                    else
-                    {
-                        yatay.Add(("buzdolabi", fridgeWidth));
-                        if (rnd.NextDouble() < 0.6)
-                        {
-                            int end = fridgeWidth + cellarWidth;
-                            if (end <= yatayMax &&
-                                !PencereIleCarpisiyorMu(fridgeWidth, end, d1Yasak, "kiler", 1))
-                                yatay.Add(("kiler", cellarWidth));
-                        }
-                    }
-                }
-
-                // --- zorunlu modülleri serbest yerleştir ---
-                while (ok && tempReq.Count > 0)
-                {
-                    int pick = rnd.Next(tempReq.Count);
-                    var m = tempReq[pick];
-                    bool yatayda = rnd.Next(2) == 0;
-                    bool yerlesti = false;
-
-                    if (yatayda)
-                    {
-                        int s = yatay.Sum(x => x.Item2);
-                        int e = s + m.Item2;
-                        if (e <= yatayMax && !PencereIleCarpisiyorMu(s, e, d1Yasak, m.Item1, 1))
-                        {
-                            yatay.Add(m); yerlesti = true;
-                        }
-                        else
-                        {
-                            int ds = corner.width2 + dikey.Sum(x => x.Item2);
-                            int de = ds + m.Item2;
-                            if (de <= dikeyMax &&
-                                !PencereIleCarpisiyorMu(ds - corner.width2, de - corner.width2, d2Yasak, m.Item1, 2))
-                            {
-                                dikey.Add(m); yerlesti = true;
-                            }
-                        }
-                    }
-                    else
-                    {
-                        int ds = corner.width2 + dikey.Sum(x => x.Item2);
-                        int de = ds + m.Item2;
-                        if (de <= dikeyMax &&
-                            !PencereIleCarpisiyorMu(ds - corner.width2, de - corner.width2, d2Yasak, m.Item1, 2))
-                        {
-                            dikey.Add(m); yerlesti = true;
-                        }
-                        else
-                        {
-                            int s = yatay.Sum(x => x.Item2);
-                            int e = s + m.Item2;
-                            if (e <= yatayMax && !PencereIleCarpisiyorMu(s, e, d1Yasak, m.Item1, 1))
-                            {
-                                yatay.Add(m); yerlesti = true;
-                            }
-                        }
-                    }
-
-                    if (!yerlesti) { ok = false; break; }
-                    tempReq.RemoveAt(pick);
-                }
-                if (!ok) continue;
-
-                // --- buzdolabı dikey sonda senaryosu ---
-                if (senaryo == 1)
-                {
-                    int ds = corner.width2 + dikey.Sum(x => x.Item2);
-                    int de = ds + fridgeWidth;
-                    if (de > dikeyMax ||
-                        PencereIleCarpisiyorMu(ds - corner.width2, de - corner.width2, d2Yasak, "buzdolabi", 2))
-                        continue;
-
-                    if (rnd.NextDouble() < 0.6)
-                    {
-                        int ks = ds;
-                        int ke = ks + cellarWidth;
-                        if (ke + fridgeWidth <= dikeyMax &&
-                            !PencereIleCarpisiyorMu(ks - corner.width2, ke - corner.width2, d2Yasak, "kiler", 2) &&
-                            !PencereIleCarpisiyorMu(ke - corner.width2, ke - corner.width2 + fridgeWidth, d2Yasak, "buzdolabi", 2))
-                        {
-                            dikey.Add(("kiler", cellarWidth));
-                            dikey.Add(("buzdolabi", fridgeWidth));
-                        }
-                        else
-                        {
-                            dikey.Add(("buzdolabi", fridgeWidth));
-                        }
-                    }
-                    else
-                    {
-                        dikey.Add(("buzdolabi", fridgeWidth));
-                    }
-                }
-
-                // --- kalan boşlukları doldur ---
-                YatayAlaniDoldurDuzgun(yatay, new List<(string, int)>(),
-                    yatay.Sum(x => x.Item2), yatayMax, d1Yasak, true);
-                DikeyAlaniDoldurDuzgun(dikey, new List<(string, int)>(),
-                    corner.width2 + dikey.Sum(x => x.Item2), dikeyMax, d2Yasak, true);
-
-                // --- parçaları birleştir ---
-                List<(string, int)> result = new List<(string, int)>();
-                result.AddRange(yatay);
-                result.Add((corner.type + "_1", corner.width1));
-                result.Add((corner.type + "_2", corner.width2));
-                result.AddRange(dikey);
-
-                // DÜZELTME: Buzdolabının doğru pozisyonda olup olmadığını kontrol et
-                int idxFr = result.FindIndex(x => x.Item1.StartsWith("buzdolabi"));
-                int cornerStartIdx = result.FindIndex(x => x.Item1.Contains("_1"));
-
-                if (senaryo == 0)
-                {
-                    // Senaryo 0: Buzdolabı yatay kısımda (duvar1) olmalı
-                    // Yani köşe modülünden ÖNCE gelmeli
-                    if (idxFr >= 0 && idxFr < cornerStartIdx)
-                    {
-                        return result;
-                    }
-                }
-                else if (senaryo == 1)
-                {
-                    // Senaryo 1: Buzdolabı dikey kısımda (duvar2) olmalı
-                    // Yani köşe modülünden SONRA gelmeli
-                    if (idxFr > cornerStartIdx + 1) // +1 çünkü köşe modülü _1 ve _2 olmak üzere 2 parça
-                    {
-                        return result;
-                    }
-                }
-
-                // Bu senaryo başarısız, diğerini dene
-            }
-
-            return null; // Hiçbir senaryo başarılı olamadı
-        }
-
-
-
-        private void YatayAlaniDoldurDuzgun(
-            List<(string, int)> moduller,
-            List<(string, int)> kaynakModuller,
-            int baslangicPoz, int maxPoz,
-            List<(int, int, string)> yasakliAlanlar,
-            bool ekstraEkle)
-        {
-            int pozisyon = baslangicPoz;
-
-            // Required'ları (varsa) yerleştir – sığmayanı silme
-            while (kaynakModuller.Any())
-            {
-                int pick = rnd.Next(kaynakModuller.Count);
-                var m = kaynakModuller[pick];
-
-                if (pozisyon + m.Item2 <= maxPoz)
-                {
-                    // Required’lar için insert değil, sona ekle (sıra bozulmasın)
-                    moduller.Add(m);
-                    pozisyon += m.Item2;
-                }
-                // denendi, sıradaki adaya geç
-                kaynakModuller.RemoveAt(pick);
-            }
-
-            if (!ekstraEkle) return;
-
-            // --- ÇİFT KORUMA AYARLARI ---
-            // buzdolabı-kiler yan yana ise aralarına eklemeyi yasakla
-            int idxFr = moduller.FindIndex(x => x.Item1.StartsWith("buzdolabi"));
-            int idxKi = moduller.FindIndex(x => x.Item1.StartsWith("kiler"));
-            int blockBetween = -1; // yasaklı sınır (insertion boundary)
-            if (idxFr != -1 && idxKi != -1 && Math.Abs(idxFr - idxKi) == 1)
-                blockBetween = Math.Min(idxFr, idxKi) + 1;
-
-            bool fridgeAtHead = (idxFr == 0); // senaryo==0 sağlığı için 0'a ekleme yapma
-
-            // Ekstra (çekmece/dolap) – boşluk kaldıkça
-            while (pozisyon < maxPoz - 40)
-            {
-                string extra = rnd.Next(2) == 0 ? "cekmece" : "dolap";
-                int w = MODULES[extra][rnd.Next(MODULES[extra].Count)];
-                if (pozisyon + w > maxPoz) break;
-
-                // izinli insert konumlarını topla
-                var allowed = Enumerable.Range(0, moduller.Count + 1).ToList();
-
-                // buzdolabı başta ise 0'a ekleme → bozar
-                if (fridgeAtHead) allowed.Remove(0);
-
-                // buzdolabı-kiler çifti arasını koru
-                if (blockBetween != -1) allowed.Remove(blockBetween);
-
-                // hiç yer kalmazsa append etme, döngüden çık
-                if (allowed.Count == 0) break;
-
-                int insertAt = allowed[rnd.Next(allowed.Count)];
-                moduller.Insert(insertAt, (extra, w));
-                pozisyon += w;
-            }
-        }
-
-
-
-
-        // Dikey için aynı strateji
-        // GELİŞTİRİLMİŞ DİKEY DOLDURMA – çift koruma + sonu koruma
-        private void DikeyAlaniDoldurDuzgun(
-            List<(string, int)> moduller,
-            List<(string, int)> kaynakModuller,
-            int baslangicPoz, int maxPoz,
-            List<(int, int, string)> yasakliAlanlar,
-            bool ekstraEkle)
-        {
-            int pozisyon = baslangicPoz;
-
-            // Required'ları (varsa) yerleştir – sığmayanı silme
-            while (kaynakModuller.Any())
-            {
-                int pick = rnd.Next(kaynakModuller.Count);
-                var m = kaynakModuller[pick];
-
-                if (pozisyon + m.Item2 <= maxPoz)
-                {
-                    moduller.Add(m); // required’lar için append
-                    pozisyon += m.Item2;
-                }
-                kaynakModuller.RemoveAt(pick);
-            }
-
-            if (!ekstraEkle) return;
-
-            // --- ÇİFT KORUMA AYARLARI ---
-            int idxFr = moduller.FindIndex(x => x.Item1.StartsWith("buzdolabi"));
-            int idxKi = moduller.FindIndex(x => x.Item1.StartsWith("kiler"));
-            int blockBetween = -1;
-            if (idxFr != -1 && idxKi != -1 && Math.Abs(idxFr - idxKi) == 1)
-                blockBetween = Math.Min(idxFr, idxKi) + 1;
-
-            bool fridgeAtTail = (idxFr == moduller.Count - 1 && idxFr != -1); // senaryo==1 sağlığı için sona ekleme yok
-
-            while (pozisyon < maxPoz - 40)
-            {
-                string extra = rnd.Next(2) == 0 ? "cekmece" : "dolap";
-                int w = MODULES[extra][rnd.Next(MODULES[extra].Count)];
-                if (pozisyon + w > maxPoz) break;
-
-                var allowed = Enumerable.Range(0, moduller.Count + 1).ToList();
-
-                // buzdolabı en sonda ise, sondan sonra ekleme (Count) yasak
-                if (fridgeAtTail) allowed.Remove(moduller.Count);
-
-                // buzdolabı-kiler çiftinin arasına ekleme
-                if (blockBetween != -1) allowed.Remove(blockBetween);
-
-                if (allowed.Count == 0) break;
-
-                int insertAt = allowed[rnd.Next(allowed.Count)];
-                moduller.Insert(insertAt, (extra, w));
-                pozisyon += w;
-            }
-        }
-
-
-
-
 
 
         private bool PencereIleCarpisiyorMu(int modulBaslangic, int modulBitis,
@@ -602,12 +576,7 @@ namespace MutfakDizilim
                 score += adjacentScore;
                 log.Add($"✔️ Bulaşık-Evye yakınlık: {(adjacentScore == 7 ? "Yan yana (+7)" : "Uzak (+3)")}");
             }
-            if (idx_cellar != -1 && idx_fridge != -1)
-            {
-                int adjacentScore = Math.Abs(idx_cellar - idx_fridge) == 1 ? 7 : 0;
-                score += adjacentScore;
-                log.Add($"✔️ Kiler-Buzdolabı yakınlık: {(adjacentScore == 7 ? "Yan yana (+7)" : "Uzak (+3)")}");
-            }
+           
 
             if (idx_fridge != -1 && idx_sink != -1 && idx_oven != -1)
             {
@@ -636,7 +605,7 @@ namespace MutfakDizilim
                 log.Add($"✔️ Fırın yanında çekmece: {(hasDrawer ? "Var (+7)" : "Yok (+3)")}");
             }
 
-            if (idx_fridge == 0 || idx_fridge == types.Count - 1)
+            if (idx_fridge == types.Count - 1)
             {
                 score += 15;
                 log.Add("✔️ Buzdolabı pozisyonu: Başta/Sonda (+15)");
@@ -715,6 +684,8 @@ namespace MutfakDizilim
 
             return totalUserScore;
         }
+
+        
 
         private async Task<Func<List<(string, int)>, int, int>> CompileUserRuleAsync(string userRule)
         {
@@ -915,49 +886,35 @@ public class UserRule
             return spacing >= 60 ? good : bad;
         }
 
-        private List<(string, int)> GenerateTekDuvarDuzeniInternal(int duvar, bool fridgeAtStart)
+        private List<(string, int)> GenerateTekDuvarDuzeni(int duvar)
         {
             // Pencere yasaklı alanları
             List<(int, int, string)> duvar1Yasakli;
             List<(int, int, string)> ignore;
             GetDuvarYasakliAlanlari(duvar, 0, out duvar1Yasakli, out ignore);
 
-            // Zorunlu modüller
-            List<string> reqTypes = new List<string> { "evye", "firin", "bulasik" };
+            // Zorunlu modüller (evye, fırın, bulaşık, buzdolabı) - rastgele sıralama
+            List<string> reqTypes = new List<string> { "evye", "firin", "bulasik", "buzdolabi" };
             for (int i = reqTypes.Count - 1; i > 0; i--)
             {
                 int j = rnd.Next(i + 1);
                 string tmp = reqTypes[i]; reqTypes[i] = reqTypes[j]; reqTypes[j] = tmp;
             }
+
             List<(string, int)> required = new List<(string, int)>();
             foreach (string t in reqTypes)
                 required.Add((t, MODULES[t][rnd.Next(MODULES[t].Count)]));
 
-            // Buzdolabı ve kiler (opsiyonel)
-            int fridgeWidth = MODULES["buzdolabi"][rnd.Next(MODULES["buzdolabi"].Count)];
-            int cellarWidth = MODULES["kiler"][rnd.Next(MODULES["kiler"].Count)];
+            // Kiler (opsiyonel, maksimum 1 tane)
+            bool kilerEklenecekMi = rnd.NextDouble() < 0.7;
+            int cellarWidth = 0;
+            if (kilerEklenecekMi)
+                cellarWidth = MODULES["kiler"][rnd.Next(MODULES["kiler"].Count)];
 
             List<(string, int)> layout = new List<(string, int)>();
             int pos = 0;
 
-            // Buzdolabı başta
-            if (fridgeAtStart &&
-                !PencereIleCarpisiyorMu(0, fridgeWidth, duvar1Yasakli, "buzdolabi", 1) &&
-                fridgeWidth <= duvar)
-            {
-                layout.Add(("buzdolabi", fridgeWidth));
-                pos += fridgeWidth;
-
-                if (rnd.NextDouble() < 0.6 &&
-                    pos + cellarWidth <= duvar &&
-                    !PencereIleCarpisiyorMu(pos, pos + cellarWidth, duvar1Yasakli, "kiler", 1))
-                {
-                    layout.Add(("kiler", cellarWidth));
-                }
-                pos += layout.Count > 1 ? cellarWidth : 0;
-            }
-
-            // Zorunlu modüller
+            // Zorunlu modülleri rastgele yerleştir
             foreach (var m in required)
             {
                 if (pos + m.Item2 > duvar ||
@@ -966,46 +923,56 @@ public class UserRule
 
                 layout.Add(m);
                 pos += m.Item2;
-            }
 
-            // Buzdolabı sonda
-            if (!fridgeAtStart)
-            {
-                if (pos + fridgeWidth > duvar ||
-                    PencereIleCarpisiyorMu(pos, pos + fridgeWidth, duvar1Yasakli, "buzdolabi", 1))
-                    return null;
-
-                layout.Add(("buzdolabi", fridgeWidth));
-                pos += fridgeWidth;
-
-                if (rnd.NextDouble() < 0.6 &&
-                    pos + cellarWidth <= duvar &&
-                    !PencereIleCarpisiyorMu(pos, pos + cellarWidth, duvar1Yasakli, "kiler", 1))
+                // Eğer bu modül buzdolabı ise ve kiler eklenecekse, hemen yanına kiler koy
+                if (m.Item1 == "buzdolabi" && kilerEklenecekMi)
                 {
-                    layout.Add(("kiler", cellarWidth));
-                    pos += cellarWidth;
+                    if (pos + cellarWidth <= duvar &&
+                        !PencereIleCarpisiyorMu(pos, pos + cellarWidth, duvar1Yasakli, "kiler", 1))
+                    {
+                        layout.Add(("kiler", cellarWidth));
+                        pos += cellarWidth;
+                        kilerEklenecekMi = false; // Kiler eklendi, tekrar ekleme
+                    }
+                    else
+                    {
+                        kilerEklenecekMi = false; // Kiler sığmıyor, vazgeç
+                    }
                 }
             }
 
-            // Kalan boşluklar
-            YatayAlaniDoldurDuzgun(layout, new List<(string, int)>(), pos, duvar, duvar1Yasakli, true);
+            // Kalan boşlukları rastgele modüllerle doldur
+            List<string> rastgeleModuller = new List<string> { "dolap", "cekmece" };
+            TekDuvarAlaniDoldurRastgele(layout, rastgeleModuller, pos, duvar, duvar1Yasakli);
 
             return layout;
         }
 
-        private List<(string, int)> GenerateTekDuvarDuzeni(int duvar)
+        
+        private void TekDuvarAlaniDoldurRastgele(List<(string, int)> layout, List<string> rastgeleModuller,
+    int mevcutPozisyon, int maxPozisyon, List<(int, int, string)> yasakliAlanlar)
         {
-            // İlk tercih rastgele %50-50
-            bool ilkTercih = rnd.Next(2) == 0;
+            while (mevcutPozisyon < maxPozisyon)
+            {
+                string seciliModul = rastgeleModuller[rnd.Next(rastgeleModuller.Count)];
+                int seciliGenislik = MODULES[seciliModul][rnd.Next(MODULES[seciliModul].Count)];
 
-            // İlk tercihi dene
-            var result = GenerateTekDuvarDuzeniInternal(duvar, ilkTercih);
-            if (result != null) return result;
+                int yeniPozisyon = mevcutPozisyon + seciliGenislik;
+                if (yeniPozisyon > maxPozisyon) break;
 
-            // Başarısız olursa karşıt pozisyonu dene
-            result = GenerateTekDuvarDuzeniInternal(duvar, !ilkTercih);
-            return result;
+                if (!PencereIleCarpisiyorMu(mevcutPozisyon, yeniPozisyon, yasakliAlanlar, seciliModul, 1))
+                {
+                    layout.Add((seciliModul, seciliGenislik));
+                    mevcutPozisyon = yeniPozisyon;
+                }
+                else
+                {
+                    break; // Pencere ile çakışıyor, dur
+                }
+            }
         }
+
+
 
         public void Dispose()
         {

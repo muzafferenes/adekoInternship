@@ -1017,26 +1017,45 @@ namespace MutfakDizilim
                     }
                     if (type == "pencere")
                     {
-                        Rectangle boşlukRect = dikey
+                        // Dış pencere dikdörtgeni
+                        Rectangle disRect = dikey
                             ? new Rectangle(x, y, yukseklik, olcekliGenislik)
                             : new Rectangle(x, y, olcekliGenislik, yukseklik);
 
-                        // Boşluğu farklı renkte göster
-                        g.FillRectangle(Brushes.LightBlue, boşlukRect);
-                        g.DrawRectangle(Pens.Black, boşlukRect);
+                        // Dış dolguyu doldur
+                        g.FillRectangle(Brushes.LightBlue, disRect);
+                        g.DrawRectangle(Pens.Black, disRect);
 
+                        // İçte daha küçük dikdörtgen oluştur (her kenardan 5 px küçült)
+                        Rectangle icRect = new Rectangle(
+                            disRect.X + 5,
+                            disRect.Y + 5,
+                            disRect.Width - 10,
+                            disRect.Height - 10);
+
+                        if (icRect.Width > 0 && icRect.Height > 0)
+                        {
+                            g.FillRectangle(Brushes.White, icRect);   // farklı renk
+                            g.DrawRectangle(Pens.Gray, icRect);       // çerçeve
+                        }
+
+                        // Etiket yazısı
                         string etiketPen = $"PEN\n{width}";
                         using (Font font = new Font("Arial", Math.Max(7, (int)(8 * olcek))))
                         {
-                            g.DrawString(etiketPen, font, Brushes.Black, boşlukRect.X + 2, boşlukRect.Y + 2);
+                            g.DrawString(etiketPen, font, Brushes.Black, disRect.X + 2, disRect.Y + 2);
                         }
 
+                        // Koordinatı ilerlet
                         if (dikey)
                             y += olcekliGenislik;
                         else
                             x += olcekliGenislik;
+
                         continue;
                     }
+
+
                     if (type == "kalanAlanıDoldurma")
                     {
                         Rectangle boşlukRect = dikey
@@ -1278,12 +1297,30 @@ namespace MutfakDizilim
                     int pencereX = baslangicX + (int)(pBas * olcek);
                     int pencereGen = (int)((pBit - pBas) * olcek);
 
-                    Rectangle pencereRect = new Rectangle(pencereX, baslangicY - 40, pencereGen, 30);
-                    g.FillRectangle(Brushes.LightBlue, pencereRect);
-                    g.DrawRectangle(Pens.Blue, pencereRect);
+                    // Dış pencere dikdörtgeni
+                    Rectangle disRect = new Rectangle(pencereX, baslangicY - 40, pencereGen, 30);
+
+                    // Dış dolguyu çiz
+                    g.FillRectangle(Brushes.LightBlue, disRect);
+                    g.DrawRectangle(Pens.Blue, disRect);
+
+                    // İçte daha küçük bir dikdörtgen (inset)
+                    int inset = Math.Max(2, (int)(3 * olcek)); // ölçeğe göre kenar boşluğu
+                    Rectangle icRect = Rectangle.Inflate(disRect, -inset, -inset);
+
+                    if (icRect.Width > 0 && icRect.Height > 0)
+                    {
+                        g.FillRectangle(Brushes.White, icRect);   // farklı renk dolgu
+                        g.DrawRectangle(Pens.Gray, icRect);       // ince çerçeve
+                    }
+
+                    // Etiket
                     using (Font font = new Font("Arial", 8))
-                        g.DrawString("PENCERE", font, Brushes.Blue, pencereRect.X + 5, pencereRect.Y + 8);
+                    {
+                        g.DrawString("PENCERE", font, Brushes.Blue, disRect.X + 5, disRect.Y + 8);
+                    }
                 }
+
 
                 // Modülleri sırayla tek hat üzerinde çiz
                 int x = baslangicX;
@@ -1376,11 +1413,25 @@ namespace MutfakDizilim
                     }
                     else if (type == "pencere")
                     {
+                        // Dış pencere dikdörtgeni
                         g.FillRectangle(Brushes.LightBlue, rect);
                         g.DrawRectangle(Pens.Black, rect);
+
+                        // İç pencere dikdörtgeni (her kenardan 4px küçültülmüş)
+                        int inset = Math.Max(2, (int)(3 * olcek));
+                        Rectangle icRect = Rectangle.Inflate(rect, -inset, -inset);
+
+                        if (icRect.Width > 0 && icRect.Height > 0)
+                        {
+                            g.FillRectangle(Brushes.White, icRect);   // farklı renk dolgu
+                            g.DrawRectangle(Pens.Gray, icRect);       // çerçeve
+                        }
+
+                        // Etiket
                         using (Font font = new Font("Arial", Math.Max(7, (int)(8 * olcek))))
                             g.DrawString($"PEN\n{width}", font, Brushes.Black, rect.X + 2, rect.Y + 2);
                     }
+
                     else if (type == "kalanAlanıDoldurma")
                     {
                         g.FillRectangle(Brushes.WhiteSmoke, rect);

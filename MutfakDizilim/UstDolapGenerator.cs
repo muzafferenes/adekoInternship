@@ -59,35 +59,64 @@ namespace MutfakDizilim
 
 
         private (int kilerBaslangic, int kilerBitis, bool duvar1de, bool duvar2de)
-    HesaplaKilerPozisyonu(List<(string, int)> altDizilim, int duvar1, int duvar2, (string type, int width1, int width2) kose)
+ HesaplaKilerPozisyonu(
+     List<(string, int)> altDizilim,
+     int duvar1, int duvar2,
+     (string type, int width1, int width2) kose)
         {
-            int toplamX = 0;
-            bool duvar1de = true;
+            // duvar-1'de global sayaç
+            int posD1 = 0;
+
+            // duvar-2'ye ancak kose_2 görüldükten sonra geçeceğiz
+            bool duvar2Basladi = false;
+            int posD2Local = 0; // duvar-2 lokal (köşe dik bacak sonrası 0)
 
             foreach (var m in altDizilim)
             {
-                // Köşe modülüne geldiğinde duvar2’ye geç
-                if (m.Item1.Contains("kose_1"))
+                // Köşe parçalarını sayaca eklemiyoruz, sadece faz değiştiriyoruz
+                if (m.Item1 == kose.type + "_1")
                 {
-                    duvar1de = false;
-                    toplamX = 0; // duvar2 koordinatları için sıfırla
+                    // kose_1: HÂLÂ duvar-1'deyiz, sadece akışta ilerliyoruz.
+                    continue;
+                }
+                if (m.Item1 == kose.type + "_2")
+                {
+                    // kose_2: duvar-2 bundan sonra başlar
+                    duvar2Basladi = true;
+                    posD2Local = 0; // lokal sıfırla
                     continue;
                 }
 
+                // Kiler kontrolü
                 if (m.Item1.Contains("kiler"))
                 {
-                    int basla = toplamX;
-                    int bitis = toplamX + m.Item2;
-
-                    return (basla, bitis, duvar1de, !duvar1de);
+                    if (!duvar2Basladi)
+                    {
+                        // DUVAR-1: global = posD1
+                        int bas = posD1;
+                        int bit = posD1 + m.Item2;
+                        return (bas, bit, true, false);
+                    }
+                    else
+                    {
+                        // DUVAR-2: global = duvar1 + corner.width2 + posD2Local
+                        int basGlobal = duvar1 + kose.width2 + posD2Local;
+                        int bitGlobal = basGlobal + m.Item2;
+                        return (basGlobal, bitGlobal, false, true);
+                    }
                 }
 
-                toplamX += m.Item2;
+                // Sayaçları ilerlet
+                if (!duvar2Basladi)
+                    posD1 += m.Item2;      // duvar-1'de sıradan modül
+                else
+                    posD2Local += m.Item2; // duvar-2'de sıradan modül (lokal)
             }
 
-            // Eğer bulunmazsa
+            // bulunamadı
             return (-1, -1, false, false);
         }
+
 
 
 
@@ -208,13 +237,6 @@ namespace MutfakDizilim
             if (toplam < hedef)
                 mods.Add(("kalanAlanıDoldurma", hedef - toplam));
         }
-
-        // ★ DÜZELTME: Köşe dolap modülü bulmak için yardımcı metot
-        private (string type, int width1, int width2) GetCornerModuleByType(string typeName)
-        {
-            return CORNER_MODULES.FirstOrDefault(x => x.type == typeName);
-        }
-
         // ★ YENİ: Köşe dolap mantığıyla GenerateLDuzeni
         private List<(string, int)> GenerateLDuzeni(int duvar1, int duvar2, List<(int basla, int bitir)> yasakliAlanlar = null, List<(string, int)> altDizilim = null)
         {
@@ -553,43 +575,59 @@ namespace MutfakDizilim
 
             return moduller;
         }
-        private List<(string, int)> BuzdolabiKilerDuvar2Dizilimi(int hedefGenislik, int buzdolabiGenislik,
-            (int kilerBaslangic, int kilerBitis, bool duvar1de, bool duvar2de) kilerPozisyon, int duvar1)
+        // UstDolapGenerator içinde
+        // DUVAR-2 için: Buzdolabı + Kiler yan yana olduğunda üst dolap dizilimi
+        // DUVAR-2 için: Buzdolabı + Kiler yan yana olduğunda üst dolap dizilimi
+        private List<(string, int)> BuzdolabiKilerDuvar2Dizilimi(
+    int dikeyHedef,
+    int buzdolabiGenislik,
+    (int kilerBaslangic, int kilerBitis, bool duvar1de, bool duvar2de) kilerPozisyon,
+    int duvar1)
         {
             var moduller = new List<(string, int)>();
-            int kilerGenislik = kilerPozisyon.kilerBitis - kilerPozisyon.kilerBaslangic;
 
-            // Kilerın DUVAR2'deki pozisyonu
+            // Kiler pozisyonunu Duvar2 koordinatına çevir
             int kilerDuvar2Baslangic = kilerPozisyon.kilerBaslangic - duvar1;
             int kilerDuvar2Bitis = kilerPozisyon.kilerBitis - duvar1;
+            int kilerGenislik = kilerDuvar2Bitis - kilerDuvar2Baslangic;
 
-            int toplam = 0;
+            // Güvenlik kontrolü: negatif pozisyonları düzelt
+            if (kilerDuvar2Baslangic < 0)
+            {
+                kilerDuvar2Baslangic = 0;
+                kilerDuvar2Bitis = kilerGenislik;
+            }
 
-            // Kilere kadar dolap
+            int currentPos = 0;
+
+            // 1) Kiler başlangıcına kadar dolap
             if (kilerDuvar2Baslangic > 0)
             {
                 var oncesiDolaplar = NormalUstDolapDizilimi(kilerDuvar2Baslangic);
                 moduller.AddRange(oncesiDolaplar);
-                toplam += oncesiDolaplar.Sum(x => x.Item2);
+                currentPos = kilerDuvar2Baslangic;
             }
 
-            // Kiler boşluğu
+            // 2) Kiler boşluğu
             moduller.Add(("bosluk1", kilerGenislik));
-            toplam += kilerGenislik;
+            currentPos += kilerGenislik;
 
-            // Kiler ile buzdolabı arası
-            int kalanDolapAlani = hedefGenislik - buzdolabiGenislik - toplam;
-            if (kalanDolapAlani > 0)
+            // 3) Kilerden buzdolabına kadar dolap
+            int buzdolabiBaslangic = dikeyHedef - buzdolabiGenislik;
+            if (currentPos < buzdolabiBaslangic)
             {
-                var araDolaplar = NormalUstDolapDizilimi(kalanDolapAlani);
+                int araAlan = buzdolabiBaslangic - currentPos;
+                var araDolaplar = NormalUstDolapDizilimi(araAlan);
                 moduller.AddRange(araDolaplar);
             }
 
-            // Buzdolabı boşluğu sona
+            // 4) Buzdolabı boşluğu
             moduller.Add(("bosluk", buzdolabiGenislik));
 
             return moduller;
         }
+
+
         private List<(string, int)> FireinKilerDuvar2Dizilimi(int hedefGenislik,
     (int firinBaslangic, int firinBitis, bool duvar1de, bool duvar2de) firinPozisyon,
     (int kilerBaslangic, int kilerBitis, bool duvar1de, bool duvar2de) kilerPozisyon, int duvar1)
@@ -823,9 +861,6 @@ namespace MutfakDizilim
         }
 
 
-        // Normal üst dolap dizilimi (buzdolabı yok)
-        // UstDolapGenerator.cs içindeki NormalUstDolapDizilimi metodunu bu ile değiştirin:
-
         private List<(string, int)> NormalUstDolapDizilimi(int hedefGenislik)
         {
             var moduller = new List<(string, int)>();
@@ -897,22 +932,22 @@ namespace MutfakDizilim
             return moduller;
         }
 
-        // Yeni metod: Optimal kombinasyon bulucu (Subset Sum benzeri)
+
         private List<int> BulOptimalKombinasyon(int hedef)
         {
-            var dolapBoyutlari = MODULES["dolap"]; // {40, 45, 50, 55, 60, 65, 70, 80, 90, 100}
+            var dolapBoyutlari = MODULES["dolap"]; 
 
-            // Küçük hedefler için brute force optimal
+           
             if (hedef <= 300)
             {
                 return BulTamKombinasyon(dolapBoyutlari.ToList(), hedef, new List<int>());
             }
 
-            // Büyük hedefler için heuristic
+            
             return BulEnIyiKombinasyon(dolapBoyutlari.ToList(), hedef);
         }
 
-        // Recursive tam kombinasyon arama (küçük hedefler için)
+       
         private List<int> BulTamKombinasyon(List<int> boyutlar, int hedef, List<int> mevcutKombinasyon)
         {
             if (hedef == 0) return new List<int>(mevcutKombinasyon); // Tam bulundu!
@@ -935,7 +970,7 @@ namespace MutfakDizilim
             return null; // Tam kombinasyon bulunamadı
         }
 
-        // Heuristic kombinasyon (büyük hedefler için)
+        
         private List<int> BulEnIyiKombinasyon(List<int> boyutlar, int hedef)
         {
             var sonuc = new List<int>();
@@ -970,7 +1005,7 @@ namespace MutfakDizilim
             return kalan == 0 ? sonuc : null; // Sadece tam doldurursa döndür
         }
 
-        // Fırın pozisyonunu hesapla
+       
         private (int firinBaslangic, int firinBitis, bool duvar1de, bool duvar2de) HesaplaFireinPozisyonu(
     List<(string, int)> altDizilim, int duvar1, int duvar2, (string type, int width1, int width2) ustKose)
         {
@@ -1025,7 +1060,7 @@ namespace MutfakDizilim
             return (0, 0, false, false);
         }
 
-        // Pozisyona göre fırın boşluğu yerleştir
+        
         private List<(string, int)> FireinBoslukluDizilim(int hedefGenislik, int firinBaslangic, int firinBitis, bool duvar1de = false)
         {
             var moduller = new List<(string, int)>();
@@ -1136,9 +1171,7 @@ namespace MutfakDizilim
         }
 
 
-        // =====================
-        // ALT DİZİLİM ANALİZ SINIFI
-        // =====================
+     
         public class AltDizilimAnaliz
         {
             public bool buzdolabiVar { get; set; }
@@ -1194,143 +1227,6 @@ namespace MutfakDizilim
             return analiz;
         }
 
-        // =====================
-        // BASİT ÜRETIM FONKSİYONLARI
-        // =====================
-        private List<(string, int)> UretBuzdolabiUst(int duvarUzunlugu, AltDizilimAnaliz analiz)
-        {
-            var moduller = new List<(string, int)>();
-            int kalanAlan = duvarUzunlugu;
-
-            // Buzdolabı üstü boşluk
-            if (analiz.buzdolabiBaslangic == 0)
-            {
-                // Duvarın başında buzdolabı
-                moduller.Add(("bosluk", analiz.buzdolabiGenislik));
-                kalanAlan -= analiz.buzdolabiGenislik;
-
-                if (kalanAlan > 0)
-                {
-                    moduller.AddRange(UretNormalUstDolap(kalanAlan));
-                }
-            }
-            else
-            {
-                // Buzdolabı ortada/sonda
-                moduller.AddRange(UretNormalUstDolap(analiz.buzdolabiBaslangic));
-                moduller.Add(("bosluk", analiz.buzdolabiGenislik));
-
-                int sonKalan = duvarUzunlugu - analiz.buzdolabiBaslangic - analiz.buzdolabiGenislik;
-                if (sonKalan > 0)
-                {
-                    moduller.AddRange(UretNormalUstDolap(sonKalan));
-                }
-            }
-
-            return SinirlaGenislik(moduller, duvarUzunlugu);
-        }
-
-        private List<(string, int)> UretFireinUst(int duvarUzunlugu, AltDizilimAnaliz analiz)
-        {
-            var moduller = new List<(string, int)>();
-
-            // Fırın üstü aspiratör boşluğu
-            if (analiz.firinBaslangic == 0)
-            {
-                moduller.Add(("bosluk2", analiz.firinGenislik)); // Aspiratör boşluğu
-                int kalan = duvarUzunlugu - analiz.firinGenislik;
-                if (kalan > 0)
-                {
-                    moduller.AddRange(UretNormalUstDolap(kalan));
-                }
-            }
-            else
-            {
-                moduller.AddRange(UretNormalUstDolap(analiz.firinBaslangic));
-                moduller.Add(("bosluk2", analiz.firinGenislik));
-
-                int sonKalan = duvarUzunlugu - analiz.firinBaslangic - analiz.firinGenislik;
-                if (sonKalan > 0)
-                {
-                    moduller.AddRange(UretNormalUstDolap(sonKalan));
-                }
-            }
-
-            return SinirlaGenislik(moduller, duvarUzunlugu);
-        }
-
-        private List<(string, int)> UretNormalUstDolap(int genislik)
-        {
-            if (genislik <= 0) return new List<(string, int)>();
-
-            var moduller = new List<(string, int)>();
-            var standartOlcular = new[] { 90, 80, 70, 60, 50, 40, 30 };
-            int kalan = genislik;
-
-            // Rastgele sıralama için
-            var random = new Random();
-            var karisikOlcular = standartOlcular.OrderBy(x => random.Next()).ToArray();
-
-            while (kalan > 0)
-            {
-                bool eklendi = false;
-                foreach (var olcu in karisikOlcular)
-                {
-                    if (kalan >= olcu)
-                    {
-                        moduller.Add(($"ust_dolap_{olcu}", olcu));
-                        kalan -= olcu;
-                        eklendi = true;
-                        break;
-                    }
-                }
-
-                if (!eklendi)
-                {
-                    // Çok küçük kalan alan
-                    if (kalan > 0)
-                    {
-                        moduller.Add(("kalanAlanıDoldurma", kalan));
-                    }
-                    break;
-                }
-            }
-
-            return moduller;
-        }
-
-        // =====================
-        // YARDIMCI FONKSİYONLAR
-        // =====================
-        private List<(string, int)> SinirlaGenislik(List<(string, int)> moduller, int maksGenislik)
-        {
-            var sinirli = new List<(string, int)>();
-            int toplam = 0;
-
-            foreach (var (tip, genislik) in moduller)
-            {
-                if (toplam + genislik <= maksGenislik)
-                {
-                    sinirli.Add((tip, genislik));
-                    toplam += genislik;
-                }
-                else
-                {
-                    int kalan = maksGenislik - toplam;
-                    if (kalan > 0)
-                    {
-                        sinirli.Add((tip, kalan));
-                    }
-                    break;
-                }
-            }
-
-            return sinirli;
-        }
-
-        // =====================
-        // ANA ÇAĞRI FONKSİYONU
-        // =====================
         private List<(string, int)> GenerateUstV2Temiz(int duvar1, bool duzModu, List<(string, int)> altDizilim = null)
         {
             if (!duzModu)
@@ -1341,9 +1237,7 @@ namespace MutfakDizilim
             return GenerateUstDuzDuvar(duvar1, altDizilim);
         }
 
-        // =====================
-        // ÜRETİM FONKSİYONU
-        // =====================
+       
         public List<(int skor, List<(string, int)> dizilim, List<string> log)>
             UretV2Temiz(int duvar1, List<(string, int)> altDizilim = null, int deneme = 100)
         {
@@ -1382,27 +1276,26 @@ namespace MutfakDizilim
         {
             var dikeyModuller = new List<(string, int)>();
 
-            // Duvar2'deki pencere bilgileri
+            
             int pencereBaslangic = pencerePozisyon.pencereBaslangicD2;
             int pencereBitis = pencerePozisyon.pencereBitisD2;
             int pencereGenislik = pencereBitis - pencereBaslangic;
 
-            // Duvar2'deki boşlukları (pencere, fırın, kiler, buzdolabı) topla ve sırala
+            
             var bosluklarListesi = new List<(int baslangic, int bitis, string tip)>();
 
-            // Pencereyi ekle
             bosluklarListesi.Add((pencereBaslangic, pencereBitis, "pencere"));
 
-            // Fırın Duvar2'de mi kontrol et
+            
             if (firinPozisyon.duvar2de)
             {
-                // Fırının Duvar2'deki pozisyonu
+                
                 int firinD2Baslangic = firinPozisyon.firinBaslangic - duvar1;
                 int firinD2Bitis = firinPozisyon.firinBitis - duvar1;
-                bosluklarListesi.Add((firinD2Baslangic, firinD2Bitis, "bosluk2")); // Aspiratör boşluğu
+                bosluklarListesi.Add((firinD2Baslangic, firinD2Bitis, "bosluk2")); 
             }
 
-            // Kiler Duvar2'de mi kontrol et
+          
             if (kilerPozisyon.duvar2de)
             {
                 int kilerD2Baslangic = kilerPozisyon.kilerBaslangic - duvar1;
@@ -1410,14 +1303,13 @@ namespace MutfakDizilim
                 bosluklarListesi.Add((kilerD2Baslangic, kilerD2Bitis, "bosluk1"));
             }
 
-            // Pozisyonlara göre sırala
             bosluklarListesi = bosluklarListesi.OrderBy(x => x.baslangic).ToList();
 
-            // Sıralı boşluklar arasına dolap yerleştir
+            
             int currentPos = 0;
             foreach (var bosluk in bosluklarListesi)
             {
-                // Boşluğa kadar dolap
+                
                 if (bosluk.baslangic > currentPos)
                 {
                     int dolapAlani = bosluk.baslangic - currentPos;
