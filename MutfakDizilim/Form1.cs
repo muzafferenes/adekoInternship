@@ -119,8 +119,8 @@ namespace MutfakDizilim
             };
 
             // RadioButtons (headerPanel üzerinde)
-            rbtnLDuvar = new RadioButton { Text = "L Duvar", Location = new Point(20, 60), Size = new Size(100, 16), Checked = true };
-            rbtnDuzDuvar = new RadioButton { Text = "Düz Duvar", Location = new Point(110, 60), Size = new Size(100, 16), Checked = false };
+            rbtnLDuvar = new RadioButton { Text = "L Duvar", Location = new Point(35, 60), Size = new Size(100, 16), Checked = true };
+            rbtnDuzDuvar = new RadioButton { Text = "Düz Duvar", Location = new Point(145, 60), Size = new Size(100, 16), Checked = false };
             headerPanel.Controls.Add(rbtnLDuvar);
             headerPanel.Controls.Add(rbtnDuzDuvar);
 
@@ -1164,7 +1164,7 @@ namespace MutfakDizilim
             g.DrawRectangle(Pens.Black, rectYatay);
             g.DrawRectangle(Pens.Black, rectDikey);
 
-            using (Font font = new Font("Arial", Math.Max(8, (int)(10 * olcek))))
+            using (Font font = new Font("tahoma", Math.Max(8, (int)(8 * olcek))))
             {
                 g.DrawString($"ÜST KÖŞE\n{w1}x{w2}", font, Brushes.Black, x + 2, y + 2);
             }
@@ -1198,7 +1198,7 @@ namespace MutfakDizilim
             g.DrawRectangle(Pens.Black, rectYatay);
             g.DrawRectangle(Pens.Black, rectDikey);
 
-            using (Font font = new Font("Tahoma", Math.Max(8, (int)(10 * olcek))))
+            using (Font font = new Font("Tahoma", Math.Max(8, (int)(8 * olcek))))
             {
                 // Kısaltma etiketini al
                 string kisaEtiket = GetKisaEtiket(type);

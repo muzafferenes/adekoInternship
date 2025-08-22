@@ -229,12 +229,34 @@ namespace MutfakDizilim
                 tempReq.RemoveAt(pick);
             }
 
-            // 5) Kiler ekleme - sadece buzdolabının yanına eklenebilir (shuffle öncesi)
+            // 5) Kiler ekleme - rastgele bir konuma eklenir (shuffle sonrası kontrol edilecek)
             bool kilerEklenecekMi = rnd.NextDouble() < 0.7; // %70 şans ile kiler ekle
             if (kilerEklenecekMi)
             {
                 int kilerWidth = MODULES["kiler"][rnd.Next(MODULES["kiler"].Count)];
-                TryEkleKilerBuzdolabiYanina(yatay, dikey, kilerWidth, yatayMax, dikeyMax, corner.width2);
+
+                // Kiler için yer var mı kontrol et
+                int yatayKalanAlan = yatayMax - yatay.Sum(x => x.Item2);
+                int dikeyKalanAlan = dikeyMax - (corner.width2 + dikey.Sum(x => x.Item2));
+
+                // Rastgele hangi duvara ekleneceğini belirle
+                List<int> uygunDuvarlar = new List<int>();
+                if (yatayKalanAlan >= kilerWidth) uygunDuvarlar.Add(1); // Duvar 1 (yatay)
+                if (dikeyKalanAlan >= kilerWidth) uygunDuvarlar.Add(2); // Duvar 2 (dikey)
+
+                if (uygunDuvarlar.Count > 0)
+                {
+                    int secilenDuvar = uygunDuvarlar[rnd.Next(uygunDuvarlar.Count)];
+                    if (secilenDuvar == 1)
+                    {
+                        yatay.Add(("kiler", kilerWidth));
+                    }
+                    else
+                    {
+                        dikey.Add(("kiler", kilerWidth));
+                    }
+                }
+                // Kilerin sığmadığı durumda eklenmeyecek
             }
 
             // 6) Kalan boşlukları rastgele modüllerle doldur (dolap, çekmece)
@@ -246,50 +268,114 @@ namespace MutfakDizilim
             ShuffleList(yatay);
             ShuffleList(dikey);
 
-            // 8) Shuffle sonrası kiler kontrolü
-            List<(string, int)> tempResult = new List<(string, int)>();
-            tempResult.AddRange(yatay);
-            tempResult.Add((corner.type + "_1", corner.width1));
-            tempResult.Add((corner.type + "_2", corner.width2));
-            tempResult.AddRange(dikey);
-
-            // Kiler varsa buzdolabının yanında mı kontrol et
-            if (!KilerBuzdolabiYanindaMi(tempResult))
+            // 8) Shuffle sonrası kiler kontrolü ve pencere kontrolleri
+            for (int deneme = 0; deneme < 10; deneme++) // Maksimum 10 deneme
             {
-                // Kiler buzdolabının yanında değilse, kileri çıkar
-                yatay.RemoveAll(x => x.Item1 == "kiler");
-                dikey.RemoveAll(x => x.Item1 == "kiler");
-            }
+                // Final sonucu oluştur
+                List<(string, int)> tempResult = new List<(string, int)>();
+                tempResult.AddRange(yatay);
+                tempResult.Add((corner.type + "_1", corner.width1));
+                tempResult.Add((corner.type + "_2", corner.width2));
+                tempResult.AddRange(dikey);
 
-            // 9) Pencere kontrolleri yap
-            if (!PencereKontrolleriniGeciyorMu(yatay, d1Yasak, 1) ||
-                !PencereKontrolleriniGeciyorMu(dikey, d2Yasak, 2, corner.width2))
-            {
-                // Pencere kontrolü başarısızsa, tekrar shuffle dene (maksimum 3 deneme)
-                for (int deneme = 0; deneme < 3; deneme++)
+                // Kiler kontrolü
+                bool kilerKontrolOK = KilerBuzdolabiYanindaMi(tempResult);
+
+                // Pencere kontrolleri
+                bool pencereKontrolOK = PencereKontrolleriniGeciyorMu(yatay, d1Yasak, 1) &&
+                                       PencereKontrolleriniGeciyorMu(dikey, d2Yasak, 2, corner.width2);
+
+                if (kilerKontrolOK && pencereKontrolOK)
+                {
+                    // Debug: Kiler hangi duvarda
+                    DebugKilerPozisyon(tempResult);
+
+                    // Her şey uygun, sonucu döndür
+                    return tempResult;
+                }
+
+                // Başarısızsa tekrar shuffle yap (son deneme değilse)
+                if (deneme < 9)
                 {
                     ShuffleList(yatay);
                     ShuffleList(dikey);
-
-                    if (PencereKontrolleriniGeciyorMu(yatay, d1Yasak, 1) &&
-                        PencereKontrolleriniGeciyorMu(dikey, d2Yasak, 2, corner.width2))
-                    {
-                        break;
-                    }
-
-                    if (deneme == 2) // Son deneme de başarısızsa
-                        return null;
                 }
             }
 
-            // 10) Final sonucu oluştur
-            List<(string, int)> result = new List<(string, int)>();
-            result.AddRange(yatay);
-            result.Add((corner.type + "_1", corner.width1));
-            result.Add((corner.type + "_2", corner.width2));
-            result.AddRange(dikey);
+            // Tüm denemeler başarısızsa kileri çıkarıp tekrar dene
+            yatay.RemoveAll(x => x.Item1 == "kiler");
+            dikey.RemoveAll(x => x.Item1 == "kiler");
 
-            return result;
+            // Son deneme - sadece pencere kontrolleri
+            for (int deneme = 0; deneme < 5; deneme++)
+            {
+                if (PencereKontrolleriniGeciyorMu(yatay, d1Yasak, 1) &&
+                    PencereKontrolleriniGeciyorMu(dikey, d2Yasak, 2, corner.width2))
+                {
+                    List<(string, int)> result = new List<(string, int)>();
+                    result.AddRange(yatay);
+                    result.Add((corner.type + "_1", corner.width1));
+                    result.Add((corner.type + "_2", corner.width2));
+                    result.AddRange(dikey);
+
+                    // Debug: Kiler hangi duvarda (kiler çıkarılmış durumda)
+                    DebugKilerPozisyon(result);
+
+                    return result;
+                }
+
+                if (deneme < 4)
+                {
+                    ShuffleList(yatay);
+                    ShuffleList(dikey);
+                }
+            }
+
+            // Hiçbir deneme başarılı olmadıysa null döndür
+            return null;
+        }
+
+        // Debug için kiler hangi duvarda test fonksiyonu
+        private void DebugKilerPozisyon(List<(string, int)> layout)
+        {
+            int kilerIndex = -1;
+            for (int i = 0; i < layout.Count; i++)
+            {
+                if (layout[i].Item1 == "kiler")
+                {
+                    kilerIndex = i;
+                    break;
+                }
+            }
+
+            if (kilerIndex == -1)
+            {
+                Console.WriteLine("Kiler yok");
+                return;
+            }
+
+            // Corner pozisyonlarını bul
+            int corner1Index = -1, corner2Index = -1;
+            for (int i = 0; i < layout.Count; i++)
+            {
+                if (layout[i].Item1.EndsWith("_1"))
+                    corner1Index = i;
+                else if (layout[i].Item1.EndsWith("_2"))
+                    corner2Index = i;
+            }
+
+            if (kilerIndex < corner1Index)
+            {
+                Console.WriteLine($"Kiler DUVAR 1'de - pozisyon: {kilerIndex}");
+            }
+            else if (kilerIndex > corner2Index)
+            {
+                Console.WriteLine($"Kiler DUVAR 2'de - pozisyon: {kilerIndex}");
+            }
+            else
+            {
+                Console.WriteLine($"Kiler corner bölgesinde? - pozisyon: {kilerIndex}");
+            }
         }
 
         // Liste shuffle metodu
@@ -331,25 +417,7 @@ namespace MutfakDizilim
             return true;
         }
 
-        // Kileri buzdolabının yanına eklemeyi deneyen metod (basitleştirilmiş)
-        private void TryEkleKilerBuzdolabiYanina(List<(string, int)> yatay, List<(string, int)> dikey,
-            int kilerWidth, int yatayMax, int dikeyMax, int cornerWidth2)
-        {
-            // Buzdolabının hangi listede olduğunu bul
-            bool buzdolabiYatayda = yatay.Any(x => x.Item1 == "buzdolabi");
-            bool buzdolabiDikeyde = dikey.Any(x => x.Item1 == "buzdolabi");
-
-            // Alan kontrolü yaparak kileri uygun listeye ekle
-            if (buzdolabiYatayda && yatay.Sum(x => x.Item2) + kilerWidth <= yatayMax)
-            {
-                yatay.Add(("kiler", kilerWidth));
-            }
-            else if (buzdolabiDikeyde && cornerWidth2 + dikey.Sum(x => x.Item2) + kilerWidth <= dikeyMax)
-            {
-                dikey.Add(("kiler", kilerWidth));
-            }
-            // Sığmıyorsa kiler eklenmez
-        }
+       
 
         // Basit rastgele modül doldurma metodu (yatay)
         private void YatayAlaniDoldurRastgele(List<(string, int)> yatay, List<string> rastgeleModuller,
@@ -401,6 +469,7 @@ namespace MutfakDizilim
             }
         }
 
+
         // Mevcut kontrol metodunuz
         private bool KilerBuzdolabiYanindaMi(List<(string, int)> layout)
         {
@@ -414,9 +483,11 @@ namespace MutfakDizilim
                     break;
                 }
             }
+
             // Kiler yoksa sorun yok
             if (kilerIndex == -1) return true;
-            // Kiler varsa, buzdolabının yanında mı kontrol et
+
+            // Buzdolabını bul
             int buzdolabiIndex = -1;
             for (int i = 0; i < layout.Count; i++)
             {
@@ -426,10 +497,53 @@ namespace MutfakDizilim
                     break;
                 }
             }
+
             // Buzdolabı yoksa (olmaması gereken durum) false döndür
             if (buzdolabiIndex == -1) return false;
-            // Kiler buzdolabının hemen yanında mı kontrol et (solunda veya sağında)
-            return Math.Abs(kilerIndex - buzdolabiIndex) == 1;
+
+            // Corner modüllerinin pozisyonlarını bul
+            int corner1Index = -1, corner2Index = -1;
+            for (int i = 0; i < layout.Count; i++)
+            {
+                if (layout[i].Item1.EndsWith("_1"))
+                {
+                    corner1Index = i;
+                }
+                else if (layout[i].Item1.EndsWith("_2"))
+                {
+                    corner2Index = i;
+                }
+            }
+
+            // Corner modülleri bulunamazsa hata
+            if (corner1Index == -1 || corner2Index == -1) return false;
+
+            // Duvar 1: 0'dan corner1Index'e kadar (corner1Index dahil değil)
+            // Corner: corner1Index ve corner2Index
+            // Duvar 2: corner2Index'ten sonraki tüm elemanlar
+
+            bool kilerDuvar1de = kilerIndex < corner1Index;
+            bool buzdolabiDuvar1de = buzdolabiIndex < corner1Index;
+
+            bool kilerDuvar2de = kilerIndex > corner2Index;
+            bool buzdolabiDuvar2de = buzdolabiIndex > corner2Index;
+
+            // Kiler ve buzdolabı aynı duvarda mı?
+            if (kilerDuvar1de && buzdolabiDuvar1de)
+            {
+                // İkisi de duvar 1'de - yanyana mı kontrol et
+                return Math.Abs(kilerIndex - buzdolabiIndex) == 1;
+            }
+            else if (kilerDuvar2de && buzdolabiDuvar2de)
+            {
+                // İkisi de duvar 2'de - yanyana mı kontrol et
+                return Math.Abs(kilerIndex - buzdolabiIndex) == 1;
+            }
+            else
+            {
+                // Farklı duvarlarda - bu durumda yanyana olamazlar
+                return false;
+            }
         }
 
         // Güncellenmiş Uret methodu
@@ -605,19 +719,22 @@ namespace MutfakDizilim
                 log.Add($"✔️ Fırın yanında çekmece: {(hasDrawer ? "Var (+7)" : "Yok (+3)")}");
             }
 
-            if (idx_fridge == types.Count - 1)
+            if (idx_fridge == 0 ||idx_fridge == types.Count - 1)
             {
                 score += 15;
                 log.Add("✔️ Buzdolabı pozisyonu: Başta/Sonda (+15)");
-                if (idx_fridge == 0 && duvar1 >duvar2)
+                if (duvar2 > 0)
                 {
-                    score += 5;
-                    log.Add("✔️ Buzdolabı pozisyonu: Uzun duvarda (+5)");
-                }
-                if(idx_fridge == types.Count - 1 && duvar2 > duvar1)
-                {
-                    score += 5;
-                    log.Add("✔️ Buzdolabı pozisyonu: Uzun duvarda (+5)");
+                    if (idx_fridge == 0 && duvar1 > duvar2)
+                    {
+                        score += 5;
+                        log.Add("✔️ Buzdolabı pozisyonu: Uzun duvarda (+5)");
+                    }
+                    if (idx_fridge == types.Count - 1 && duvar2 > duvar1)
+                    {
+                        score += 5;
+                        log.Add("✔️ Buzdolabı pozisyonu: Uzun duvarda (+5)");
+                    }
                 }
             }
             else
@@ -893,62 +1010,200 @@ public class UserRule
             List<(int, int, string)> ignore;
             GetDuvarYasakliAlanlari(duvar, 0, out duvar1Yasakli, out ignore);
 
-            // Zorunlu modüller (evye, fırın, bulaşık, buzdolabı) - rastgele sıralama
+            // Zorunlu modüller (evye, fırın, bulaşık, buzdolabı)
             List<string> reqTypes = new List<string> { "evye", "firin", "bulasik", "buzdolabi" };
-            for (int i = reqTypes.Count - 1; i > 0; i--)
-            {
-                int j = rnd.Next(i + 1);
-                string tmp = reqTypes[i]; reqTypes[i] = reqTypes[j]; reqTypes[j] = tmp;
-            }
-
             List<(string, int)> required = new List<(string, int)>();
             foreach (string t in reqTypes)
                 required.Add((t, MODULES[t][rnd.Next(MODULES[t].Count)]));
 
             // Kiler (opsiyonel, maksimum 1 tane)
-            bool kilerEklenecekMi = rnd.NextDouble() < 0.7;
+            double kilerSansi = rnd.NextDouble();
+            bool kilerEklenecekMi = kilerSansi < 0.7;
+            Console.WriteLine($"Kiler şansı: {kilerSansi:F2}, Eklenecek mi: {kilerEklenecekMi}");
+
             int cellarWidth = 0;
             if (kilerEklenecekMi)
-                cellarWidth = MODULES["kiler"][rnd.Next(MODULES["kiler"].Count)];
+            {
+                if (MODULES["kiler"].Count == 0)
+                {
+                    Console.WriteLine("HATA: MODULES['kiler'] boş!");
+                    kilerEklenecekMi = false;
+                }
+                else
+                {
+                    cellarWidth = MODULES["kiler"][rnd.Next(MODULES["kiler"].Count)];
+                    Console.WriteLine($"Seçilen kiler genişliği: {cellarWidth}");
+                }
+            }
 
             List<(string, int)> layout = new List<(string, int)>();
-            int pos = 0;
+            List<(string, int)> tempReq = new List<(string, int)>(required);
 
-            // Zorunlu modülleri rastgele yerleştir
-            foreach (var m in required)
+            // Zorunlu modülleri basit şekilde yerleştir (sona ekleme)
+            int pos = 0;
+            while (tempReq.Count > 0)
             {
-                if (pos + m.Item2 > duvar ||
-                    PencereIleCarpisiyorMu(pos, pos + m.Item2, duvar1Yasakli, m.Item1, 1))
+                int pick = rnd.Next(tempReq.Count);
+                var m = tempReq[pick];
+
+                if (pos + m.Item2 > duvar)
+                {
+                    // Modül sığmıyor, başarısız
                     return null;
+                }
 
                 layout.Add(m);
                 pos += m.Item2;
+                tempReq.RemoveAt(pick);
+            }
 
-                // Eğer bu modül buzdolabı ise ve kiler eklenecekse, hemen yanına kiler koy
-                if (m.Item1 == "buzdolabi" && kilerEklenecekMi)
+            Console.WriteLine($"Zorunlu modüller yerleştirildi. Mevcut pozisyon: {pos}, Duvar genişliği: {duvar}");
+
+            // Kiler ekleme (rastgele konuma, shuffle sonrası kontrol edilecek)
+            if (kilerEklenecekMi)
+            {
+                Console.WriteLine($"Kiler ekleme kontrolü: pos({pos}) + cellarWidth({cellarWidth}) = {pos + cellarWidth} <= duvar({duvar}) = {pos + cellarWidth <= duvar}");
+
+                if (pos + cellarWidth <= duvar)
                 {
-                    if (pos + cellarWidth <= duvar &&
-                        !PencereIleCarpisiyorMu(pos, pos + cellarWidth, duvar1Yasakli, "kiler", 1))
-                    {
-                        layout.Add(("kiler", cellarWidth));
-                        pos += cellarWidth;
-                        kilerEklenecekMi = false; // Kiler eklendi, tekrar ekleme
-                    }
-                    else
-                    {
-                        kilerEklenecekMi = false; // Kiler sığmıyor, vazgeç
-                    }
+                    layout.Add(("kiler", cellarWidth));
+                    pos += cellarWidth;
+                    Console.WriteLine($"✓ Kiler başarıyla eklendi! Yeni pozisyon: {pos}");
                 }
+                else
+                {
+                    Console.WriteLine($"✗ Kiler sığmadı! Gerekli alan: {pos + cellarWidth}, Mevcut duvar: {duvar}");
+                }
+            }
+            else
+            {
+                Console.WriteLine("Kiler eklenmeyecek (şans %70'e denk gelmedi)");
             }
 
             // Kalan boşlukları rastgele modüllerle doldur
             List<string> rastgeleModuller = new List<string> { "dolap", "cekmece" };
             TekDuvarAlaniDoldurRastgele(layout, rastgeleModuller, pos, duvar, duvar1Yasakli);
 
-            return layout;
+            // *** ÖNEMLİ: Sıralamayı shuffle et ***
+            Console.WriteLine("Shuffle öncesi: " + string.Join(", ", layout.Select(x => x.Item1)));
+            ShuffleList(layout);
+            Console.WriteLine("Shuffle sonrası: " + string.Join(", ", layout.Select(x => x.Item1)));
+
+            // Shuffle sonrası kiler ve pencere kontrolleri
+            for (int deneme = 0; deneme < 10; deneme++)
+            {
+                // Kiler kontrolü
+                bool kilerKontrolOK = KilerBuzdolabiYanindaMiTekDuvar(layout);
+
+                // Pencere kontrolleri
+                bool pencereKontrolOK = PencereKontrolleriniGeciyorMu(layout, duvar1Yasakli, 1);
+
+                Console.WriteLine($"Deneme {deneme + 1}: Kiler kontrol: {kilerKontrolOK}, Pencere kontrol: {pencereKontrolOK}");
+
+                if (kilerKontrolOK && pencereKontrolOK)
+                {
+                    // Debug: Kiler hangi pozisyonda
+                    DebugKilerPozisyonTekDuvar(layout);
+
+                    return layout;
+                }
+
+                // Başarısızsa tekrar shuffle yap (son deneme değilse)
+                if (deneme < 9)
+                {
+                    ShuffleList(layout);
+                }
+            }
+
+            // Tüm denemeler başarısızsa kileri çıkarıp tekrar dene
+            Console.WriteLine("Tüm denemeler başarısız, kiler çıkarılıyor");
+            layout.RemoveAll(x => x.Item1 == "kiler");
+
+            // Son deneme - sadece pencere kontrolleri
+            for (int deneme = 0; deneme < 5; deneme++)
+            {
+                if (PencereKontrolleriniGeciyorMu(layout, duvar1Yasakli, 1))
+                {
+                    // Debug: Kiler çıkarıldı
+                    DebugKilerPozisyonTekDuvar(layout);
+
+                    return layout;
+                }
+
+                if (deneme < 4)
+                {
+                    ShuffleList(layout);
+                }
+            }
+
+            // Hiçbir deneme başarılı olmadıysa null döndür
+            return null;
         }
 
-        
+        // Tek duvar için kiler pozisyon debug fonksiyonu
+        private void DebugKilerPozisyonTekDuvar(List<(string, int)> layout)
+        {
+            int kilerIndex = -1;
+            int buzdolabiIndex = -1;
+
+            for (int i = 0; i < layout.Count; i++)
+            {
+                if (layout[i].Item1 == "kiler")
+                    kilerIndex = i;
+                else if (layout[i].Item1 == "buzdolabi")
+                    buzdolabiIndex = i;
+            }
+
+            if (kilerIndex == -1)
+            {
+                Console.WriteLine("TEK DUVAR: Kiler yok");
+            }
+            else if (buzdolabiIndex == -1)
+            {
+                Console.WriteLine("TEK DUVAR: Buzdolabı bulunamadı!");
+            }
+            else
+            {
+                bool yanYana = Math.Abs(kilerIndex - buzdolabiIndex) == 1;
+                Console.WriteLine($"TEK DUVAR: Kiler pozisyon {kilerIndex}, Buzdolabı pozisyon {buzdolabiIndex}, Yanyana: {yanYana}");
+            }
+        }
+
+        // Tek duvar için basitleştirilmiş kiler kontrolü
+        private bool KilerBuzdolabiYanindaMiTekDuvar(List<(string, int)> layout)
+        {
+            // Önce kiler var mı kontrol et
+            int kilerIndex = -1;
+            for (int i = 0; i < layout.Count; i++)
+            {
+                if (layout[i].Item1 == "kiler")
+                {
+                    kilerIndex = i;
+                    break;
+                }
+            }
+
+            // Kiler yoksa sorun yok
+            if (kilerIndex == -1) return true;
+
+            // Buzdolabını bul
+            int buzdolabiIndex = -1;
+            for (int i = 0; i < layout.Count; i++)
+            {
+                if (layout[i].Item1 == "buzdolabi")
+                {
+                    buzdolabiIndex = i;
+                    break;
+                }
+            }
+
+            // Buzdolabı yoksa (olmaması gereken durum) false döndür
+            if (buzdolabiIndex == -1) return false;
+
+            // Kiler buzdolabının hemen yanında mı kontrol et (solunda veya sağında)
+            return Math.Abs(kilerIndex - buzdolabiIndex) == 1;
+        }
+
         private void TekDuvarAlaniDoldurRastgele(List<(string, int)> layout, List<string> rastgeleModuller,
     int mevcutPozisyon, int maxPozisyon, List<(int, int, string)> yasakliAlanlar)
         {
